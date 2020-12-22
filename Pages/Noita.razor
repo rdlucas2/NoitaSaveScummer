@@ -1,0 +1,134 @@
+﻿@page "/noita"
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+@inject IToastService toastService
+@using Microsoft.AspNetCore.SignalR.Client;
+@using BlazorApp1.Data;
+
+<h1>Noita</h1>
+
+<p>Game is <b><i>@gameState</i></b></p>
+
+<button type="button" @onclick="@StartNoita" disabled="@startBtnDisabled">Start Game</button>
+
+@*<button class="btn btn-info" @onclick="@(() => toastService.ShowInfo("I'm an INFO message"))">Info Toast</button>
+    <button class="btn btn-success" @onclick="@(() => toastService.ShowSuccess("I'm a SUCCESS message with a custom title", "Congratulations!"))">Success Toast</button>
+    <button class="btn btn-warning" @onclick="@(() => toastService.ShowWarning("I'm a WARNING message"))">Warning Toast</button>
+    <button class="btn btn-danger" @onclick="@(() => toastService.ShowError("I'm an ERROR message"))">Error Toast</button>*@
+
+<table class="table">
+    <thead>
+        <tr>
+            <th>#</th>
+            <th>Time Of Save</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var option in saveMenu.OrderByDescending(x => x.Ticks))
+        {
+            <tr>
+                <td>@option.Choice</td>
+                <td>@option.TimeOfSave</td>
+                <td><button type="button" @onclick="@(e => Reload(option.Choice))"><span class="oi oi-reload" aria-hidden="true"></span></button></td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    private HubConnection hubConnection;
+    private string gameState;
+    private bool startBtnDisabled;
+    private List<SaveOption> saveMenu = new List<SaveOption>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        hubConnection = new HubConnectionBuilder()
+            .WithUrl(NavigationManager.ToAbsoluteUri("/noitahub"))
+            .Build();
+
+        //when the save data is updated, it is broadcasted
+        hubConnection.On<List<SaveOption>>("GetSaveMenu", (newSaveMenu) =>
+        {
+            saveMenu = newSaveMenu;
+            toastService.ShowInfo("Menu Updated.");
+            StateHasChanged();
+        });
+
+        hubConnection.On<bool>("UpdateProcessExists", (processExists) =>
+        {
+            gameState = processExists ? "running" : "not running.";
+            startBtnDisabled = processExists;
+            toastService.ShowInfo("Game State Updated");
+            StateHasChanged();
+        });
+
+        hubConnection.On<string>("NoitaExited", async (message) =>
+        {
+            Console.WriteLine(message);
+            if (await PromptForSave())
+            {
+                await Save();
+                await StartNoita();
+            }
+        });
+
+        await hubConnection.StartAsync();
+
+        if (!saveMenu.Any())
+            await GetSaveMenu();
+
+        await CheckGameState();
+    }
+
+    private async Task CheckGameState()
+    {
+        bool processExists = await hubConnection.InvokeAsync<bool>("NoitaProcessExists");
+        gameState = processExists ? "running" : "not running.";
+        startBtnDisabled = processExists;
+        toastService.ShowInfo("Game State Updated");
+        StateHasChanged();
+    }
+
+    private async Task GetSaveMenu()
+    {
+        List<SaveOption> newSaveMenu = await hubConnection.InvokeAsync<List<SaveOption>>("GetSaveMenu");
+        saveMenu = newSaveMenu;
+        toastService.ShowInfo("Menu Updated.");
+        StateHasChanged();
+    }
+
+    private async Task<bool> PromptForSave()
+    {
+        return await JSRuntime.InvokeAsync<bool>("confirm", $"Save Game Data?");
+    }
+
+    private async Task StartNoita()
+    {
+        string response = await hubConnection.InvokeAsync<string>("StartNoita");
+        Console.WriteLine(response);
+        toastService.ShowInfo(response);
+    }
+
+    private async Task Reload(string saveChoice)
+    {
+        string response = await hubConnection.InvokeAsync<string>("LoadGameData", saveChoice);
+        Console.WriteLine(response);
+        toastService.ShowInfo(response);
+    }
+
+    private async Task Save()
+    {
+        string response = await hubConnection.InvokeAsync<string>("SaveGameData");
+        Console.WriteLine(response);
+        toastService.ShowInfo(response);
+    }
+
+    public bool IsConnected => hubConnection.State == HubConnectionState.Connected;
+
+    public async ValueTask DisposeAsync()
+    {
+        await hubConnection.DisposeAsync();
+    }
+}
