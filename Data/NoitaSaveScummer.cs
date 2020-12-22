@@ -1,4 +1,6 @@
-﻿using Microsoft.AspNetCore.SignalR;
+﻿using Blazored.Toast.Services;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Configuration;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -21,15 +23,17 @@ namespace BlazorApp1.Data
         private Timer _noitaProcessTimer;
         private IHubContext<NoitaHub> _hubContext;
         
-        public NoitaSaveScummer(IHubContext<NoitaHub> hubContext)
+        public NoitaSaveScummer(IConfiguration configuration, IHubContext<NoitaHub> hubContext)
         {
             _hubContext = hubContext;
+            //TODO: pull these from a config file, maybe with these as defaults
             _appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            _noitaAppDataPath = _appDataPath + @"Low\Nolla_Games_Noita\";
+            _noitaAppDataPath = _appDataPath + "Low" + Path.DirectorySeparatorChar + "Nolla_Games_Noita" + Path.DirectorySeparatorChar;
             _noitaSavePath = _noitaAppDataPath + "save00";
-            _noitaScumPath = _noitaAppDataPath + @"scum\";
-            _steamPath = @"C:\Program Files (x86)\Steam\steam.exe";
-            _steamGameIdPath = "steam://rungameid/881100";
+            _noitaScumPath = _noitaAppDataPath + "scum" + Path.DirectorySeparatorChar;
+            _steamPath = configuration.GetValue<string>("steamPath"); //@"C:\Program Files (x86)\Steam\steam.exe";
+            _steamGameIdPath = configuration.GetValue<string>("steamGameIdPath"); //"steam://rungameid/881100";
+            _waitTime = configuration.GetValue<int>("waitTimeInMilliseconds");
 
             _noitaProcessTimer = new Timer(_waitTime);
             _noitaProcessTimer.Elapsed += TryAttachExitEvent;
@@ -52,16 +56,25 @@ namespace BlazorApp1.Data
 
         public Dictionary<string, DirectoryInfo> GetSaveMenu()
         {
-            string[] saveDirs = Directory.GetDirectories(_noitaScumPath);
-            Dictionary<string, DirectoryInfo> saveMenu = new Dictionary<string, DirectoryInfo>();
-            int counter = 1;
-            foreach (string saveDir in saveDirs)
+            try
             {
-                saveMenu.Add(counter.ToString(), new DirectoryInfo(saveDir));
-                counter++;
+                string[] saveDirs = Directory.GetDirectories(_noitaScumPath);
+                Dictionary<string, DirectoryInfo> saveMenu = new Dictionary<string, DirectoryInfo>();
+                int counter = 1;
+                foreach (string saveDir in saveDirs)
+                {
+                    saveMenu.Add(counter.ToString(), new DirectoryInfo(saveDir));
+                    counter++;
+                }
+                saveMenu.OrderBy(x => x.Value.LastWriteTime);
+                return saveMenu;
             }
-            saveMenu.OrderBy(x => x.Value.LastWriteTime);
-            return saveMenu;
+            catch (Exception ex)
+            {
+                //TOAST -> LEVEL, MSG, HEADING
+                _hubContext.Clients.All.SendAsync("Toast", ToastLevel.Error, ex.ToString(), "Exception:");
+                return new Dictionary<string, DirectoryInfo>();
+            }
         }
 
         public List<SaveOption> WebFriendlySaveMenu()

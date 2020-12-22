@@ -74,6 +74,11 @@
             }
         });
 
+        hubConnection.On<ToastLevel, string, string>("Toast", (level, message, heading) =>
+        {
+            toastService.ShowToast(level, message, heading);
+        });
+
         await hubConnection.StartAsync();
 
         if (!saveMenu.Any())
